@@ -28,40 +28,72 @@ export class AssessmentHandler {
         throw new Error('Identifier is required for API call');
       }
 
-      const baseUrl = process.env.MIDDLEWARE_SERVICE_BASE_URL;
+      // ==================== OLD CODE (COMMENTED OUT) ====================
+      // const baseUrl = process.env.MIDDLEWARE_SERVICE_BASE_URL;
+      // if (!baseUrl) {
+      //   throw new Error('MIDDLEWARE_SERVICE_BASE_URL not configured');
+      // }
+
+      // const url = new URL('action/composite/v3/search', baseUrl);
+
+      // const payload = {
+      //   request: {
+      //     filters: {
+      //       identifier: [identifier],
+      //     },
+      //   },
+      // };
+
+      // const apiResponse = await axios.post(
+      //   url.toString(),
+      //   payload,
+      //   {
+      //     timeout: 10000, // 10 second timeout
+      //     headers: {
+      //       'Content-Type': 'application/json',
+      //     },
+      //   }
+      // );
+
+      // let externalData;
+      // if ((apiResponse.data as any)?.result?.QuestionSet?.[0]) {
+      //   externalData = (apiResponse.data as any)?.result?.QuestionSet?.[0];
+      // } else if ((apiResponse.data as any)?.result?.content?.[0]) {
+      //   externalData = apiResponse.data?.result?.content?.[0];
+      // } else {
+      //   throw new Error('Invalid API response structure or empty QuestionSet');
+      // }
+      // ==================== END OLD CODE ====================
+
+      // ==================== NEW CODE (ACTIVE) ====================
+      const baseUrl = process.env.COURSE_HIERARCHY_API_URL;
       if (!baseUrl) {
-        throw new Error('MIDDLEWARE_SERVICE_BASE_URL not configured');
+        throw new Error('COURSE_HIERARCHY_API_URL not configured');
       }
 
-      const url = new URL('action/composite/v3/search', baseUrl);
+      // Construct URL: baseUrl + identifier
+      const url = `${baseUrl}api/course/v1/hierarchy/${identifier}?mode=edit`;
+      console.log(`[AssessmentHandler] Fetching course hierarchy from: ${url}`);
 
-      const payload = {
-        request: {
-          filters: {
-            identifier: [identifier],
-          },
-        },
-      };
-
-      const apiResponse = await axios.post(
-        url.toString(),
-        payload,
+      const apiResponse = await axios.get(
+        url,
         {
           timeout: 10000, // 10 second timeout
           headers: {
+            'Accept': 'application/json, text/plain, */*',
             'Content-Type': 'application/json',
           },
         }
       );
 
+      // Extract data from the new API response structure
       let externalData;
-      if ((apiResponse.data as any)?.result?.QuestionSet?.[0]) {
-        externalData = (apiResponse.data as any)?.result?.QuestionSet?.[0];
-      } else if ((apiResponse.data as any)?.result?.content?.[0]) {
-        externalData = apiResponse.data?.result?.content?.[0];
+      if (apiResponse.data?.result?.content) {
+        externalData = apiResponse.data.result.content;
       } else {
-        throw new Error('Invalid API response structure or empty QuestionSet');
+        throw new Error('Invalid API response structure or empty content');
       }
+      // ==================== END NEW CODE ====================
 
       const enrichedData = {
         ...data,

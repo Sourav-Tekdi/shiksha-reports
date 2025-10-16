@@ -25,6 +25,9 @@ export class Cohort {
   @Column({ name: 'Type', type: 'text', nullable: true })
   type?: string;
 
+  @Column({ name: 'Status', type: 'text', nullable: true })
+  status?: string;
+
   @Column({ name: 'CoStateID', type: 'numeric', nullable: true })
   coStateId?: number;
 

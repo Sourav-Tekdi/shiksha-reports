@@ -174,6 +174,49 @@ export class DatabaseService {
     return this.cohortNewRepo.save(data);
   }
 
+  async upsertCohortData(cohortData: Partial<Cohort>) {
+    try {
+      // Check if cohort exists
+      const existingCohort = await this.cohortNewRepo.findOne({
+        where: { cohortId: cohortData.cohortId },
+      });
+
+      if (existingCohort) {
+        // Update existing cohort - explicitly update all fields
+        await this.cohortNewRepo.update(
+          { cohortId: cohortData.cohortId },
+          {
+            tenantId: cohortData.tenantId,
+            cohortName: cohortData.cohortName,
+            parentId: cohortData.parentId,
+            type: cohortData.type,
+            status: cohortData.status, // Ensure status is updated
+            coStateId: cohortData.coStateId,
+            coDistrictId: cohortData.coDistrictId,
+            coBlockId: cohortData.coBlockId,
+            coVillageId: cohortData.coVillageId,
+            coBoard: cohortData.coBoard,
+            coGrade: cohortData.coGrade,
+            coMedium: cohortData.coMedium,
+            coSubject: cohortData.coSubject,
+            coGoogleMapLink: cohortData.coGoogleMapLink,
+            coIndustry: cohortData.coIndustry,
+          },
+        );
+        console.log(`[DatabaseService] Updated cohort ${cohortData.cohortId} with status: ${cohortData.status}`);
+        return { action: 'updated', cohortId: cohortData.cohortId };
+      } else {
+        // Insert new cohort
+        const newCohort = await this.cohortNewRepo.save(cohortData);
+        console.log(`[DatabaseService] Created new cohort ${cohortData.cohortId} with status: ${cohortData.status}`);
+        return { action: 'created', cohortId: newCohort.cohortId };
+      }
+    } catch (error) {
+      console.error('Error in upsertCohortData:', error);
+      throw error;
+    }
+  }
+
   async deleteCohortData(data: any) {
     return this.cohortNewRepo.delete(data);
   }

@@ -11,8 +11,18 @@ export class CohortHandler {
 
   async handleCohortUpsert(data: any) {
     try {
+      console.log(`[CohortHandler] Processing COHORT_UPDATED/CREATED for cohortId: ${data.cohortId}`);
+      console.log(`[CohortHandler] Incoming status: ${data.status}`);
+      
       const transformedData = await this.transformService.transformCohortData(data);
-      return this.dbService.saveCohortData(transformedData);
+      
+      console.log(`[CohortHandler] Transformed status: ${transformedData.status}`);
+      
+      // Use upsertCohortData which properly handles updates
+      const result = await this.dbService.upsertCohortData(transformedData);
+      
+      console.log(`[CohortHandler] Cohort ${result.action}: ${result.cohortId}`);
+      return result;
     } catch (error) {
       console.error('Error handling cohort upsert:', error);
       throw error;
@@ -30,11 +40,18 @@ export class CohortHandler {
 
   async handleCohortUpdate(data: any) {
     try {
+      console.log(`[CohortHandler] Processing COHORT_UPDATE for cohortId: ${data.cohortId}`);
+      console.log(`[CohortHandler] Incoming status: ${data.status}`);
+      
       const transformedData = await this.transformService.transformCohortData(data);
-      // For update, we need to use the cohortId as the identifier
-      const { cohortId, ...updateData } = transformedData;
-      // Use the existing saveCohortData method as it handles upserts
-      return this.dbService.saveCohortData(transformedData);
+      
+      console.log(`[CohortHandler] Transformed status: ${transformedData.status}`);
+      
+      // Use upsertCohortData which properly handles updates
+      const result = await this.dbService.upsertCohortData(transformedData);
+      
+      console.log(`[CohortHandler] Cohort ${result.action}: ${result.cohortId}`);
+      return result;
     } catch (error) {
       console.error('Error handling cohort update:', error);
       throw error;
