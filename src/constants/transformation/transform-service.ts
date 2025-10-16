@@ -278,6 +278,7 @@ export class TransformService {
         createdOn: data.createdAt ? new Date(data.createdAt) : undefined,
         parentId: data.parentId,
         type: correctedType,
+        status: data.status,
 
         // Location fields from custom fields
         coStateId: extractCustomField('STATE'),
