@@ -18,6 +18,9 @@ import { AssessmentTracker } from 'src/entities/assessment-tracker.entity';
 import { CourseTracker } from 'src/entities/course-tracker.entity';
 import { ContentTracker } from 'src/entities/content-tracker.entity';
 import { RegistrationTracker } from 'src/entities/registration-tracker.entity';
+import { Course } from 'src/entities/course.entity';
+import { QuestionSet } from 'src/entities/question-set.entity';
+import { ExternalCourseData, ExternalQuestionSetData } from 'src/types/cron.types';
 
 @Injectable()
 export class TransformService {
@@ -511,4 +514,139 @@ export class TransformService {
       throw error;
     }
   }
+
+  /**
+   * Transform external course data to Course entity format
+   */
+  async transformExternalCourseData(data: ExternalCourseData): Promise<Partial<Course>> {
+    try {
+      // Validate required fields
+      if (!data.identifier) {
+        throw new Error('Course identifier is required');
+      }
+
+      // Transform date fields
+      const transformDate = (dateValue: string | Date | null | undefined): Date | null => {
+        if (!dateValue) return null;
+        
+        if (typeof dateValue === 'string') {
+          const parsed = new Date(dateValue);
+          return isNaN(parsed.getTime()) ? null : parsed;
+        }
+        
+        if (dateValue instanceof Date) {
+          return isNaN(dateValue.getTime()) ? null : dateValue;
+        }
+        
+        return null;
+      };
+
+      // Transform text fields to handle arrays and objects
+      const transformText = (value: any): string | null => {
+        if (!value) return null;
+        
+        if (typeof value === 'string') return value;
+        if (typeof value === 'number') return value.toString();
+        if (Array.isArray(value)) return value.join(', ');
+        if (typeof value === 'object') return JSON.stringify(value);
+        
+        return null;
+      };
+
+      const transformedData: Partial<Course> = {
+        identifier: data.identifier,
+        name: data.name || null,
+        author: data.author || null,
+        primaryuser: data.primaryuser || null,
+        se_domains: transformText(data.se_domains),
+        contentlanguage: data.contentlanguage || null,
+        status: data.status || null,
+        targetagegroup: data.targetagegroup || null,
+        se_subdomains: transformText(data.se_subdomains),
+        childnodes: transformText(data.childnodes),
+        keywords: transformText(data.keywords),
+        channel: data.channel || null,
+        lastpublishedon: transformDate(data.lastpublishedon),
+        createdby: data.createdby || null,
+        program: data.program || null,
+        audience: data.audience || null,
+        se_subjects: transformText(data.se_subjects),
+        description: data.description || null,
+      };
+      return transformedData;
+    } catch (error) {
+      console.error('Error transforming course data:', error, {
+        identifier: data.identifier,
+        error: error.message,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Transform external question set data to QuestionSet entity format
+   */
+  async transformQuestionSetData(data: ExternalQuestionSetData): Promise<Partial<QuestionSet>> {
+    try {
+      // Validate required fields
+      if (!data.identifier) {
+        throw new Error('QuestionSet identifier is required');
+      }
+
+      // Transform date fields
+      const transformDate = (dateValue: string | Date | null | undefined): Date | null => {
+        if (!dateValue) return null;
+        
+        if (typeof dateValue === 'string') {
+          const parsed = new Date(dateValue);
+          return isNaN(parsed.getTime()) ? null : parsed;
+        }
+        
+        if (dateValue instanceof Date) {
+          return isNaN(dateValue.getTime()) ? null : dateValue;
+        }
+        
+        return null;
+      };
+
+      // Transform text fields to handle arrays and objects
+      const transformText = (value: any): string | null => {
+        if (!value) return null;
+        
+        if (typeof value === 'string') return value;
+        if (typeof value === 'number') return value.toString();
+        if (Array.isArray(value)) return value.join(', ');
+        if (typeof value === 'object') return JSON.stringify(value);
+        
+        return null;
+      };
+
+      // Handle different field name variations from API
+      const getFieldValue = (primaryField: any, alternativeField?: any): any => {
+        return primaryField || alternativeField || null;
+      };
+
+      const transformedData: Partial<QuestionSet> = {
+        identifier: data.identifier,
+        name: data.name || null,
+        childNodes: transformText(getFieldValue(data.childNodes)),
+        createdOn: transformDate(getFieldValue(data.createdOn)),
+        program: transformText(getFieldValue(data.program)),
+        assessmentType: data.assessmentType || null,
+        contentLanguage: transformText(getFieldValue(data.contentLanguage, data.language)),
+        domain: transformText(getFieldValue(data.se_domains, data.domain)),
+        subDomain: transformText(getFieldValue(data.se_subdomains, data.subDomain)),
+        subject: transformText(getFieldValue(data.se_subjects, data.subject)),
+      };
+
+      return transformedData;
+    } catch (error) {
+      console.error('Error transforming question set data:', error, {
+        identifier: data.identifier,
+        error: error.message,
+      });
+      throw error;
+    }
+  }
+
 }
