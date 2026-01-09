@@ -29,6 +29,7 @@ export class TransformService {
 
   async transformUserData(data: UserEventData) {
     try {
+      console.log("transformUserData -->",data)
       // const tenant = data.tenantData?.[0] ?? {}; // Commented out as it's not used
 
       // Extract custom field values from the new Kafka message structure
@@ -112,7 +113,7 @@ export class TransformService {
         userId: data.userId,
         username: data.username,
         fullName:
-          `${data.firstName || ''} ${data.middleName ? data.middleName + ' ' : ''}${data.lastName || ''}`.trim(),
+          `${data.firstName || ''} ${data.middleName ? data.middleName + ' ' : ''}${data.lastName || ''}`.trim()|| undefined,
         email: data.email,
         mobile: data.mobile?.toString(),
         dob: data.dob,

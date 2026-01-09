@@ -188,13 +188,16 @@ export class UserHandler {
 
       // Convert status to boolean (active = true, archived/inactive = false)
       const isActive = data.status?.toLowerCase() === 'active';
-
+      console.log("hiii")
       // Transform and update user data with custom fields if provided
       if (data.customFields && Array.isArray(data.customFields)) {
+        console.log("hiii2")
         const transformedUserData = await this.transformService.transformUserData(data);
+        console.log(transformedUserData);
         await this.dbService.saveUserProfileData(transformedUserData);
         console.log(`[UserHandler] User profile updated with custom fields for userId=${data.userId}`);
       } else if (data.user) {
+        console.log("hiii3")
         // Fallback to basic user update if no custom fields
         const userUpdateData = {
           userId: data.userId,
@@ -204,9 +207,12 @@ export class UserHandler {
           mobile: data.user.mobile?.toString(),
           updatedAt: data.updatedAt ? new Date(data.updatedAt) : new Date(),
         };
+        console.log(userUpdateData);
+
         await this.dbService.saveUserProfileData(userUpdateData);
         console.log(`[UserHandler] User profile updated for userId=${data.userId}`);
       }
+      console.log("hiii4")
 
       // Prepare registration tracker data
       const registrationTrackerData = {
