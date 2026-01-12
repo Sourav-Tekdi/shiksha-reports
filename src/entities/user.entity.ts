@@ -275,4 +275,25 @@ export class User {
   @Column({ name: 'UserLastLogin', type: "timestamptz", nullable: true })
   userLastLogin: Date | null; // Timestamp for last login
 
+  @Column({ name: 'UserCallLogs', type: 'json', nullable: true })
+  userCallLogs?: string | object | null;
+
+  @Column({ name: 'UserTypeOfLearner', type: 'text', nullable: true })
+  userTypeOfLearner?: string;
+
+  @Column({ name: 'UserInterestedContent', type: 'text', nullable: true })
+  userInterestedContent?: string;
+
+  @Column({ name: 'UserInterestedToJoin', type: 'boolean', nullable: true })
+  userInterestedToJoin?: boolean;
+
+  @Column({ name: 'UserIsVolunteer', type: 'boolean', nullable: true })
+  userIsVolunteer?: boolean;
+
+  @Column({ name: 'UserWhatProgramAreYouPartOf', type: 'text', nullable: true })
+  userWhatProgramAreYouPartOf?: string;
+
+  @Column({ name: 'UserSupportNeeded', type: 'text', nullable: true })
+  userSupportNeeded?: string;
+
 }

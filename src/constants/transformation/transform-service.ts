@@ -133,12 +133,15 @@ export class TransformService {
         districtId: extractCustomField('DISTRICT'),
         blockId: extractCustomField('BLOCK'),
         villageId: extractCustomField('VILLAGE'),
-
+        
         // Additional custom fields mapped to entity properties
         userFatherName: extractCustomField('FATHER_NAME'),
+        userMotherName: extractCustomField('MOTHER_NAME'),
+        userSpouseName: extractCustomField('SPOUSE_NAME'),
         userGuardianName: extractCustomField('NAME_OF_GUARDIAN'),
         userGuardianRelation: extractCustomField('RELATION_WITH_GUARDIAN'),
         userParentPhone: extractCustomField('PARENT_GUARDIAN_PHONE_NO'),
+        userSubjectTaught: extractCustomField('SUBJECTS_I_TEACH'),
         userClass: extractCustomField(
           'HIGHEST_EDCATIONAL_QUALIFICATION_OR_LAST_PASSED_GRADE',
         ),
@@ -146,6 +149,7 @@ export class TransformService {
         userWhatDoYouWantToBecome: extractCustomField(
           'WHAT_DO_YOU_WANT_TO_BECOME',
         ),
+        userPreferredLanguage: extractCustomField('PREFERRED_LANGUAGE'),
         userDropOutReason: extractCustomField(
           'REASON_FOR_DROP_OUT_FROM_SCHOOL',
         ),
@@ -153,16 +157,24 @@ export class TransformService {
         preferredModeOfLearning: extractCustomField(
           'WHAT_IS_YOUR_PREFERRED_MODE_OF_LEARNING',
         ),
+        userDesignation: extractCustomField('DESIGNATION'),
+        UserNumOfChildrenWorkingWith: extractCustomField('NUMBER_OF_CHILDREN_IN_YOUR_GROUP'),
+        userCallLogs: extractCustomField('CALL_LOGS'),
+        userTypeOfLearner: extractCustomField('TYPE_OF_LEARNER'),
 
+        userWhatProgramAreYouPartOf: extractCustomField('WHAT PROGRAM ARE YOU PART OF'),
+        userSupportNeeded: extractCustomField('SUPPORT_NEEDED'),
+        UserInterestedContent: extractCustomField('WHAT_TYPE_OF_CONTENT_ARE_YOU_INTERESTED_IN'),
+        
         // Additional fields from new structure
         centerId: extractCustomField('CENTER'),
         phoneTypeAccessible: extractCustomField('TYPE_OF_PHONE_ACCESSIBLE'),
         familyMemberDetails: extractCustomField('FAMILY_MEMBER_DETAILS'),
 
         // Boolean fields
-        userOwnPhoneCheck: convertToBoolean(
-          extractCustomField('DOES_THIS_PHONE_BELONG_TO_YOU'),
-        ),
+        userOwnPhoneCheck: convertToBoolean(extractCustomField('DOES_THIS_PHONE_BELONG_TO_YOU')),
+        userInterestedToJoin: convertToBoolean(extractCustomField('INTERESTED_TO_JOIN')),
+        userIsVolunteer: convertToBoolean(extractCustomField('IS_VOLUNTEER')),
 
         // ERP and Manager fields (extracted by fieldId)
         erpUserId: extractCustomFieldById('93de5cc5-9437-4ca7-95f3-3b2f31b24093'),
