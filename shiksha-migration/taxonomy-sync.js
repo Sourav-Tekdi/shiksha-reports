@@ -12,14 +12,11 @@ console.log('=== Loading taxonomy-sync.js ===');
 dns.setDefaultResultOrder('ipv4first');
 
 // ============================================================
-// CONFIGURATION - Change this value to run for different frameworks
+// CONFIGURATION - All frameworks to sync
 // ============================================================
-// Examples: 'scp-framework', 'pos-framework', 'nios-framework'
-const FRAMEWORK_NAME = process.argv[2] || 'scp-framework';
+const FRAMEWORK_NAMES = ['pragyanpath-framework', 'pos-framework', 'scp-framework'];
 // ============================================================
-
 // API Configuration
-const FRAMEWORK_API_URL = `https://lap.prathamdigital.org/api/framework/v1/read/${FRAMEWORK_NAME}`;
 const API_HEADERS = {
   'Accept': 'application/json, text/plain, */*',
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
@@ -39,7 +36,8 @@ const axiosInstance = axios.create({
 });
 
 // Fetch framework data from API with retry
-async function fetchFrameworkData(retries = 3) {
+async function fetchFrameworkData(frameworkName, retries = 3) {
+  const FRAMEWORK_API_URL = `https://lap.prathamdigital.org/api/framework/v1/read/${frameworkName}`;
   console.log('[TAXONOMY SYNC] Fetching framework data from API...');
   console.log(`[TAXONOMY SYNC] API URL: ${FRAMEWORK_API_URL}`);
   
@@ -232,11 +230,12 @@ function escapeSql(str) {
 }
 
 // Main sync function
-async function syncTaxonomy() {
+async function syncTaxonomy(frameworkName) {
   console.log('=== STARTING TAXONOMY SYNC ===');
+  console.log(`🎯 Framework: ${frameworkName}`);
   
   // Step 1: Fetch framework data from API
-  const rawFramework = await fetchFrameworkData();
+  const rawFramework = await fetchFrameworkData(frameworkName);
   
   // Step 2: Parse the framework data
   frameworkData = parseFrameworkData(rawFramework);
@@ -253,12 +252,14 @@ async function syncTaxonomy() {
   
   const insertStatements = [];
   const updateStatements = [];
+  const deleteStatements = [];
   const summary = {
     totalInJson: 0,
     totalInDb: 0,
     matched: 0,
     toInsert: 0,
     toUpdate: 0,
+    toDelete: 0,
     boardsChecked: []
   };
 
@@ -266,13 +267,14 @@ async function syncTaxonomy() {
     await destClient.connect();
     console.log('[TAXONOMY SYNC] Connected to destination database');
 
-    // Fetch all existing taxonomy data
+    // Fetch all existing taxonomy data for this framework
     console.log('[TAXONOMY SYNC] Fetching existing taxonomy data...');
     const result = await destClient.query(`
       SELECT id, taxonomyid, taxonomy_name, taxonomy_description, 
              level1, level2, level3, level4, level5, status 
       FROM public.taxonomy
-    `);
+      WHERE taxonomyid = $1
+    `, [frameworkName]);
     
     const dbRecords = result.rows;
     summary.totalInDb = dbRecords.length;
@@ -294,10 +296,12 @@ async function syncTaxonomy() {
     console.log('\n[TAXONOMY SYNC] Comparing data board by board (matching by lowercase description)...\n');
     
     const processedBoards = new Set();
+    const expectedKeys = new Set(); // Track all expected keys from API
     
     for (const expected of expectedRecords) {
       // Create key using lowercase descriptions
       const key = createKey(expected.level1, expected.level2, expected.level3, expected.level4);
+      expectedKeys.add(key); // Add to expected keys set
       const existing = dbMap.get(key);
       
       // Track board processing (use display value for logging)
@@ -323,7 +327,7 @@ async function syncTaxonomy() {
         // Record doesn't exist - need to INSERT (use original descriptions from JSON for level values)
         // Format: Board - Grade - Medium - Subject
         const taxonomyName = `${expected.level2Display} - ${expected.level1Display} - ${expected.level3Display} - ${expected.level4Display}`;
-        const insertSql = `INSERT INTO public.taxonomy (taxonomyid, taxonomy_name, taxonomy_description, level1, level2, level3, level4, level5, status) VALUES ('${FRAMEWORK_NAME}', '${escapeSql(taxonomyName)}', '${escapeSql(taxonomyName)}', '${escapeSql(expected.level1Display)}', '${escapeSql(expected.level2Display)}', '${escapeSql(expected.level3Display)}', '${escapeSql(expected.level4Display)}', NULL, '${expected.status}');`;
+        const insertSql = `INSERT INTO public.taxonomy (taxonomyid, taxonomy_name, taxonomy_description, level1, level2, level3, level4, level5, status) VALUES ('${frameworkName}', '${escapeSql(taxonomyName)}', '${escapeSql(taxonomyName)}', '${escapeSql(expected.level1Display)}', '${escapeSql(expected.level2Display)}', '${escapeSql(expected.level3Display)}', '${escapeSql(expected.level4Display)}', NULL, '${expected.status}');`;
         
         insertStatements.push({
           sql: insertSql,
@@ -395,6 +399,29 @@ async function syncTaxonomy() {
       }
     }
 
+    // Check for records that exist in DB but not in API (should be deleted)
+    console.log('\n[TAXONOMY SYNC] Checking for records in DB but not in API...');
+    for (const [key, record] of dbMap) {
+      if (!expectedKeys.has(key)) {
+        // This record exists in DB but not in API response - mark for deletion
+        const deleteSql = `DELETE FROM public.taxonomy WHERE id = ${record.id}; -- Not found in API: ${record.level2} - ${record.level1} - ${record.level3} - ${record.level4}`;
+        
+        deleteStatements.push({
+          sql: deleteSql,
+          id: record.id,
+          board: record.level2,
+          medium: record.level3,
+          grade: record.level1,
+          subject: record.level4,
+          taxonomyName: record.taxonomy_name,
+          reason: 'Not present in API response'
+        });
+        
+        summary.toDelete++;
+        console.log(`  🗑️  DELETE: ${record.level2} > ${record.level3} > ${record.level1} > ${record.level4}`);
+      }
+    }
+
     // Generate output files (as logs)
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const outputDir = path.join(__dirname, 'taxonomy-scripts');
@@ -442,6 +469,21 @@ async function syncTaxonomy() {
       console.log(`📄 UPDATE script logged to: ${updateFile}`);
     }
 
+    // Write DELETE script (as log)
+    if (deleteStatements.length > 0) {
+      const deleteFile = path.join(outputDir, `taxonomy-delete-${timestamp}.sql`);
+      let deleteContent = `-- Taxonomy DELETE Script (LOG)\n-- Generated: ${new Date().toISOString()}\n-- Total records to delete: ${deleteStatements.length}\n-- Status: EXECUTED\n-- Reason: Records exist in DB but not in API response\n\n`;
+      
+      for (const stmt of deleteStatements) {
+        deleteContent += `-- ${stmt.board} > ${stmt.medium} > ${stmt.grade} > ${stmt.subject}\n`;
+        deleteContent += `-- Taxonomy Name: ${stmt.taxonomyName}\n`;
+        deleteContent += stmt.sql + '\n\n';
+      }
+      
+      fs.writeFileSync(deleteFile, deleteContent);
+      console.log(`📄 DELETE script logged to: ${deleteFile}`);
+    }
+
     // Execute INSERT statements directly in database
     if (insertStatements.length > 0) {
       console.log('\n[TAXONOMY SYNC] 🚀 Executing INSERT statements...');
@@ -484,16 +526,38 @@ async function syncTaxonomy() {
       console.log(`[TAXONOMY SYNC] UPDATE completed: ${updateSuccess} success, ${updateFailed} failed`);
     }
 
+    // Execute DELETE statements directly in database
+    if (deleteStatements.length > 0) {
+      console.log('\n[TAXONOMY SYNC] 🚀 Executing DELETE statements...');
+      let deleteSuccess = 0;
+      let deleteFailed = 0;
+      
+      for (const stmt of deleteStatements) {
+        try {
+          await destClient.query(stmt.sql);
+          deleteSuccess++;
+          console.log(`  ✅ Deleted: ${stmt.board} - ${stmt.grade} - ${stmt.medium} - ${stmt.subject}`);
+        } catch (err) {
+          deleteFailed++;
+          console.error(`  ❌ Failed to delete: ${stmt.board} - ${stmt.grade} - ${stmt.medium} - ${stmt.subject}`);
+          console.error(`     Error: ${err.message}`);
+        }
+      }
+      
+      console.log(`[TAXONOMY SYNC] DELETE completed: ${deleteSuccess} success, ${deleteFailed} failed`);
+    }
+
     // Print summary
     console.log('\n' + '='.repeat(60));
     console.log('                    SYNC SUMMARY');
     console.log('='.repeat(60));
-    console.log(`🎯 Framework:                 ${FRAMEWORK_NAME}`);
+    console.log(`🎯 Framework:                 ${frameworkName}`);
     console.log(`📊 Total records in API:      ${summary.totalInJson}`);
     console.log(`📊 Total records in Database: ${summary.totalInDb}`);
     console.log(`✅ Matched (no changes):      ${summary.matched}`);
     console.log(`➕ INSERTED (new records):    ${summary.toInsert}`);
     console.log(`🔄 UPDATED (status change):   ${summary.toUpdate}`);
+    console.log(`🗑️  DELETED (not in API):     ${summary.toDelete}`);
     console.log('='.repeat(60));
     
     console.log('\n📋 Board-wise Summary:');
@@ -513,7 +577,7 @@ async function syncTaxonomy() {
     }
     console.log('-'.repeat(80));
 
-    if (summary.toInsert === 0 && summary.toUpdate === 0) {
+    if (summary.toInsert === 0 && summary.toUpdate === 0 && summary.toDelete === 0) {
       console.log('\n✅ Database is already in sync with API. No changes needed!');
     } else {
       console.log(`\n✅ Database sync completed!`);
@@ -534,11 +598,37 @@ async function syncTaxonomy() {
 // Run the sync only if this script is run directly
 if (require.main === module) {
   console.log('Running taxonomy-sync.js directly');
-  console.log(`\n🎯 Framework: ${FRAMEWORK_NAME}`);
-  console.log(`📡 API URL: ${FRAMEWORK_API_URL}\n`);
+  console.log(`\n🎯 Frameworks to sync: ${FRAMEWORK_NAMES.join(', ')}\n`);
   
-  syncTaxonomy().catch(err => {
-    console.error('Taxonomy sync failed:', err);
+  // Run sync for all frameworks one by one
+  (async () => {
+    for (let i = 0; i < FRAMEWORK_NAMES.length; i++) {
+      const frameworkName = FRAMEWORK_NAMES[i];
+      console.log('\n' + '═'.repeat(80));
+      console.log(`    SYNCING FRAMEWORK ${i + 1}/${FRAMEWORK_NAMES.length}: ${frameworkName}`);
+      console.log('═'.repeat(80) + '\n');
+      
+      try {
+        await syncTaxonomy(frameworkName);
+        console.log(`\n✅ Successfully completed sync for: ${frameworkName}`);
+      } catch (err) {
+        console.error(`\n❌ Failed to sync framework: ${frameworkName}`);
+        console.error('Error:', err);
+        // Continue with next framework even if one fails
+      }
+      
+      // Add a delay between frameworks to avoid overwhelming the API
+      if (i < FRAMEWORK_NAMES.length - 1) {
+        console.log('\nWaiting 2 seconds before next framework...\n');
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+    
+    console.log('\n' + '═'.repeat(80));
+    console.log('    ALL FRAMEWORKS SYNC COMPLETED');
+    console.log('═'.repeat(80));
+  })().catch(err => {
+    console.error('Taxonomy sync process failed:', err);
     process.exit(1);
   });
 } else {
