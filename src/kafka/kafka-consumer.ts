@@ -14,6 +14,7 @@ import { AssessmentHandler } from '../handlers/assessment.handler';
 import { EventHandler } from 'src/handlers/event.handler';
 import { CohortHandler } from 'src/handlers/cohort.handler';
 import { CohortMemberHandler } from 'src/handlers/cohort-member.handler';
+import { ProjectHandler } from 'src/handlers/project.handler';
 
 @Injectable()
 export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
@@ -31,6 +32,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
     private readonly eventHandler: EventHandler,
     private readonly cohortHandler: CohortHandler,
     private readonly cohortMemberHandler: CohortMemberHandler,
+    private readonly projectHandler: ProjectHandler,
   ) {
     const brokers = this.configService
       .get<string>('KAFKA_BROKERS', 'localhost:9092')
@@ -137,8 +139,21 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async processEvent(topic: string, event: any) {
-    const { eventType, data } = event;
+    // Check if message has standard wrapper format (eventType + data)
+    if (event.eventType && event.data) {
+      // Standard wrapped format
+      await this.processWrappedEvent(topic, event.eventType, event.data);
+      return;
+    }
 
+    // Direct message format (no wrapper) - infer event type from topic and message
+    this.logger.log(
+      `Received direct message format from topic [${topic}], inferring event type...`,
+    );
+    await this.processDirectMessage(topic, event);
+  }
+
+  private async processWrappedEvent(topic: string, eventType: string, data: any) {
     if (!eventType || !data) {
       this.logger.warn(
         `Invalid event received from topic ${topic}. EventType: ${eventType}, Data present: ${!!data}`,
@@ -163,6 +178,12 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    // Special routing for project planner events regardless of topic
+    if (eventType === 'COURSE_PLANNER_PROJECT_CREATED') {
+      await this.handleProjectEvent(eventType, data);
+      return;
+    }
+
     switch (topic) {
       case 'user-topic':
         await this.handleUserEvent(eventType, data);
@@ -178,6 +199,10 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
 
       case 'tracking-topic':
         await this.handleAssessmentEvent(eventType, data);
+        break;
+
+      case 'project-topic':
+        await this.handleProjectEvent(eventType, data);
         break;
 
       default:
@@ -283,5 +308,77 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
       default:
         this.logger.warn(`Unhandled content eventType: ${eventType}`);
     }
+  }
+
+  private async handleProjectEvent(eventType: string, data: any) {
+    this.logger.log(`Handling project-event type: ${eventType}`);
+    switch (eventType) {
+      case 'COURSE_PLANNER_PROJECT_CREATED':
+        return this.projectHandler.handleProjectCreated(data);
+      case 'PROJECT_SYNC_CREATED':
+      case 'PROJECT_SYNC_UPDATED':
+        return this.projectHandler.handleProjectSyncUpdate(data);
+      case 'PROJECT_TASK_UPDATED':
+        return this.projectHandler.handleProjectTaskUpdate(data);
+      default:
+        this.logger.warn(`Unhandled project eventType: ${eventType}`);
+    }
+  }
+
+  /**
+   * Handle direct messages (without eventType/data wrapper)
+   * Infer event type based on topic and message structure
+   */
+  private async processDirectMessage(topic: string, message: any) {
+    try {
+      switch (topic) {
+        case 'project-sync-topic':
+          // Infer event type based on message fields
+          const eventType = this.inferProjectSyncEventType(message);
+          this.logger.log(
+            `Inferred event type: ${eventType} for topic: ${topic}`,
+          );
+          await this.handleProjectEvent(eventType, message);
+          break;
+
+        case 'project-update-topic':
+          // Handle project task updates
+          this.logger.log(
+            `Processing PROJECT_TASK_UPDATED event from topic: ${topic}`,
+          );
+          await this.handleProjectEvent('PROJECT_TASK_UPDATED', message);
+          break;
+
+        default:
+          this.logger.warn(
+            `Received direct message from unmapped topic: ${topic}`,
+          );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error processing direct message from topic ${topic}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  /**
+   * Infer event type for project-sync-topic messages
+   */
+  private inferProjectSyncEventType(message: any): string {
+    // Check if this is a new project or an update
+    if (message.createdAt && message.updatedAt) {
+      const created = new Date(message.createdAt);
+      const updated = new Date(message.updatedAt);
+      
+      // If created and updated are very close (within 1 second), it's likely a creation event
+      const timeDiff = Math.abs(updated.getTime() - created.getTime());
+      if (timeDiff < 1000) {
+        return 'PROJECT_SYNC_CREATED';
+      }
+    }
+
+    // Default to update event
+    return 'PROJECT_SYNC_UPDATED';
   }
 }

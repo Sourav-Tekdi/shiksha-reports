@@ -178,7 +178,7 @@ export class ExternalApiService {
     const dataTypeConfig = this.config.dataTypes[dataType];
     
     // Get date for filtering (custom date or previous day in IST)
-    const filterDate = this.config.dateFilter.customDate || this.getPreviousDayIST();
+    // const filterDate = this.config.dateFilter.customDate || this.getPreviousDayIST();
     
     // this.logger.info(`Making API request for ${dataType} data`, {
     //   date: filterDate,
@@ -189,14 +189,14 @@ export class ExternalApiService {
     const requestBody: PrathamApiRequest = {
       request: {
         filters: {
-          status: ['Live'],
+          status: ['Live','Retired'],
           primaryCategory: Array.isArray(dataTypeConfig.primaryCategory) 
             ? dataTypeConfig.primaryCategory 
             : [dataTypeConfig.primaryCategory],
-          createdOn: filterDate, // Previous day's date in IST or custom date from config
+          // createdOn: filterDate, // Previous day's date in IST or custom date from config
         },
         fields: dataTypeConfig.fields,
-        limit: 2000, // Fetch all data in one request
+        limit:10000, // Fetch all data in one request
         offset: 0,
       },
     };
@@ -317,6 +317,7 @@ export class ExternalApiService {
         subDomain: item.se_subdomains || item.subDomain || item.SubDomain || null,
         subject: item.se_subjects || item.subject || item.Subject || null,
         language: item.language || item.contentLanguage || item.Language || item.ContentLanguage || null,
+        status: item.status || item.Status || null,
       }));
   }
 
@@ -450,7 +451,7 @@ export class ExternalApiService {
   // Fetch question set hierarchy by identifier (no token required)
   async getQuestionSetHierarchy(doId: string): Promise<any | null> {
     const base = this.config.externalApi.assessmentBaseUrl;
-    const url = `${base}/questionset/v5/hierarchy/${doId}`;
+    const url = `${base}/questionset/v5/hierarchy/${doId}?mode=edit`;
     try {
       const res = await this.requestWithRetry(() => this.axiosInstance.get(url));
       return (res as any)?.data?.result?.questionset ?? null;

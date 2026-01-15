@@ -32,6 +32,10 @@ import { ContentHandler } from './handlers/content.handler';
 import { CohortHandler } from './handlers/cohort.handler';
 import { CohortMemberHandler } from './handlers/cohort-member.handler';
 import { RegistrationTracker } from './entities/registration-tracker.entity';
+import { ProjectHandler } from './handlers/project.handler';
+import { Project } from './entities/project.entity';
+import { ProjectTask } from './entities/projectTask.entity';
+import { ProjectTaskTracking } from './entities/projectTaskTracking.entity';
 
 @Module({
   imports: [
@@ -78,6 +82,9 @@ import { RegistrationTracker } from './entities/registration-tracker.entity';
       Course, // Add Course entity for cron job service
       QuestionSet, // Add QuestionSet entity for future use
       Content, // Add Content entity for cron job service
+      Project, // Add Project entity for course planner
+      ProjectTask, // Add ProjectTask entity for course planner
+      ProjectTaskTracking, // Add ProjectTaskTracking entity for tracking completed tasks
     ]),
   ],
   controllers: [
@@ -94,6 +101,7 @@ import { RegistrationTracker } from './entities/registration-tracker.entity';
     EventHandler,
     CohortHandler,
     CohortMemberHandler,
+    ProjectHandler,
     TransformService,
     // Cron job services
     ExternalApiService,

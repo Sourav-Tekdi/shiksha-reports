@@ -30,7 +30,7 @@ async function fetchDataFromAPI(offset = 0) {
   const payload = {
     request: {
       filters: {
-        status: ["Live"],
+        status: ["Live","Retired"],
         primaryCategory: ["Learning Resource", "Story", "Activity", "Interactive"]
       },
       fields: [
@@ -78,61 +78,61 @@ async function insertDataToDatabase(destClient, data) {
   console.log(`[API MIGRATION] Inserting ${data.length} records to database`);
   
   for (const record of data) {
-    const insertQuery = `
-      INSERT INTO public."Content"(
-        "identifier", "name", "author", "primaryCategory", "channel", "status",
-        "contentType", "contentLanguage", "se_domains", "se_subdomains", "se_subjects",
-        "targetAgeGroup", "audience", "program", "keywords", "description",
-        "createdBy", "lastPublishedOn", "createdOn"
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-      ON CONFLICT ("identifier") DO UPDATE SET
-        "name" = EXCLUDED."name",
-        "author" = EXCLUDED."author",
-        "primaryCategory" = EXCLUDED."primaryCategory",
-        "channel" = EXCLUDED."channel",
-        "status" = EXCLUDED."status",
-        "contentType" = EXCLUDED."contentType",
-        "contentLanguage" = EXCLUDED."contentLanguage",
-        "se_domains" = EXCLUDED."se_domains",
-        "se_subdomains" = EXCLUDED."se_subdomains",
-        "se_subjects" = EXCLUDED."se_subjects",
-        "targetAgeGroup" = EXCLUDED."targetAgeGroup",
-        "audience" = EXCLUDED."audience",
-        "program" = EXCLUDED."program",
-        "keywords" = EXCLUDED."keywords",
-        "description" = EXCLUDED."description",
-        "createdBy" = EXCLUDED."createdBy",
-        "lastPublishedOn" = EXCLUDED."lastPublishedOn",
-        "createdOn" = EXCLUDED."createdOn"
-      RETURNING "identifier"
-    `;
-    
-    const values = [
-      record.identifier,
-      record.name,
-      record.author,
-      record.primaryCategory,
-      record.channel,
-      record.status,
-      record.contentType,
-      processFieldValue('contentLanguage', record.contentLanguage),
-      processFieldValue('se_domains', record.se_domains),
-      processFieldValue('se_subdomains', record.se_subdomains),
-      processFieldValue('se_subjects', record.se_subjects),
-      processFieldValue('targetAgeGroup', record.targetAgeGroup),
-      processFieldValue('audience', record.audience),
-      processFieldValue('program', record.program),
-      processFieldValue('keywords', record.keywords),
-      record.description,
-      record.createdBy,
-      record.lastPublishedOn,
-      record.createdOn
-    ];
-    
-    const result = await destClient.query(insertQuery, values);
-    console.log(`[API MIGRATION] ✅ Inserted/updated record: ${result.rows[0].identifier}`);
-  }
-  
+  const insertQuery = `
+    INSERT INTO public."Content"(
+      "identifier", "name", "author", "primaryCategory", "channel", "status",
+      "contentType", "contentLanguage", "domains", "subdomains", "subjects",
+      "targetAgeGroup", "audience", "program", "keywords", "description",
+      "createdBy", "lastPublishedOn", "createdOn"
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+    ON CONFLICT ("identifier") DO UPDATE SET
+      "name" = EXCLUDED."name",
+      "author" = EXCLUDED."author",
+      "primaryCategory" = EXCLUDED."primaryCategory",
+      "channel" = EXCLUDED."channel",
+      "status" = EXCLUDED."status",
+      "contentType" = EXCLUDED."contentType",
+      "contentLanguage" = EXCLUDED."contentLanguage",
+      "domains" = EXCLUDED."domains",
+      "subdomains" = EXCLUDED."subdomains",
+      "subjects" = EXCLUDED."subjects",
+      "targetAgeGroup" = EXCLUDED."targetAgeGroup",
+      "audience" = EXCLUDED."audience",
+      "program" = EXCLUDED."program",
+      "keywords" = EXCLUDED."keywords",
+      "description" = EXCLUDED."description",
+      "createdBy" = EXCLUDED."createdBy",
+      "lastPublishedOn" = EXCLUDED."lastPublishedOn",
+      "createdOn" = EXCLUDED."createdOn"
+    RETURNING "identifier"
+  `;
+
+  const values = [
+    record.identifier,
+    record.name,
+    record.author,
+    record.primaryCategory,
+    record.channel,
+    record.status,
+    record.contentType,
+    processFieldValue('contentLanguage', record.contentLanguage),
+    processFieldValue('se_domains', record.se_domains),
+    processFieldValue('se_subdomains', record.se_subdomains),
+    processFieldValue('se_subjects', record.se_subjects),
+    processFieldValue('targetAgeGroup', record.targetAgeGroup),
+    processFieldValue('audience', record.audience),
+    processFieldValue('program', record.program),
+    processFieldValue('keywords', record.keywords),
+    record.description,
+    record.createdBy,
+    record.lastPublishedOn,
+    record.createdOn
+  ];
+
+  const result = await destClient.query(insertQuery, values);
+  console.log(`[API MIGRATION] ✅ Inserted/updated record: ${result.rows[0].identifier}`);
+}
+
   console.log(`[API MIGRATION] ✅ Successfully processed ${data.length} records`);
 }
 

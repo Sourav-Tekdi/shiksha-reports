@@ -12,6 +12,9 @@ import { AssessmentTracker } from 'src/entities/assessment-tracker.entity';
 import { CourseTracker } from 'src/entities/course-tracker.entity';
 import { ContentTracker } from 'src/entities/content-tracker.entity';
 import { RegistrationTracker } from 'src/entities/registration-tracker.entity';
+import { Project } from 'src/entities/project.entity';
+import { ProjectTask } from 'src/entities/projectTask.entity';
+import { ProjectTaskTracking } from 'src/entities/projectTaskTracking.entity';
 
 @Injectable()
 export class DatabaseService {
@@ -36,6 +39,12 @@ export class DatabaseService {
     private contentTrackerRepo: Repository<ContentTracker>,
     @InjectRepository(RegistrationTracker)
     private registrationTrackerRepo: Repository<RegistrationTracker>,
+    @InjectRepository(Project)
+    private projectRepo: Repository<Project>,
+    @InjectRepository(ProjectTask)
+    private projectTaskRepo: Repository<ProjectTask>,
+    @InjectRepository(ProjectTaskTracking)
+    private projectTaskTrackingRepo: Repository<ProjectTaskTracking>,
   ) {}
 
   private readonly logger = new Logger(DatabaseService.name);
@@ -166,7 +175,7 @@ export class DatabaseService {
     updates: Record<string, string | null | undefined>,
   ) {
     // Only allow specific columns to be updated
-    const allowed = new Set(['Subject', 'Fees', 'Registration', 'Board']);
+    const allowed = new Set(['Subject', 'Fees', 'Registration', 'Board', 'MemberStatus']);
     const entries = Object.entries(updates).filter(([k, v]) =>
       allowed.has(k),
     );
@@ -792,6 +801,261 @@ export class DatabaseService {
       );
     } catch (error) {
       console.error('Error updating user last login:', error);
+      throw error;
+    }
+  }
+
+  // Project methods
+  async saveProjectData(data: Partial<Project>) {
+    return this.projectRepo.save(data);
+  }
+
+  async findProject(projectId: string) {
+    return this.projectRepo.findOne({
+      where: { ProjectId: projectId },
+    });
+  }
+
+  async upsertProject(projectData: Partial<Project>) {
+    try {
+      // Use database-level upsert with ON CONFLICT
+      const result = await this.projectRepo
+        .createQueryBuilder()
+        .insert()
+        .into(Project)
+        .values(projectData)
+        .orUpdate(
+          [
+            'ProjectName',
+            'Board',
+            'Medium',
+            'Subject',
+            'Grade',
+            'Type',
+            'StartDate',
+            'EndDate',
+            'CreatedBy',
+          ],
+          ['ProjectId'],
+        )
+        .execute();
+
+      this.logger.log(
+        `[DatabaseService] Project upserted: ProjectId=${projectData.ProjectId}`,
+      );
+
+      return result;
+    } catch (error) {
+      // Fallback to find and update if database doesn't support UPSERT
+      const existingProject = await this.projectRepo.findOne({
+        where: { ProjectId: projectData.ProjectId },
+      });
+
+      if (existingProject) {
+        this.logger.log(
+          `[DatabaseService] Updating existing project: ProjectId=${projectData.ProjectId}`,
+        );
+        return this.projectRepo.update(
+          { ProjectId: projectData.ProjectId },
+          projectData,
+        );
+      } else {
+        this.logger.log(
+          `[DatabaseService] Creating new project: ProjectId=${projectData.ProjectId}`,
+        );
+        return this.projectRepo.save(projectData);
+      }
+    }
+  }
+
+  // ProjectTask methods
+  async saveProjectTaskData(data: Partial<ProjectTask>) {
+    return this.projectTaskRepo.save(data);
+  }
+
+  async findProjectTask(projectTaskId: string) {
+    return this.projectTaskRepo.findOne({
+      where: { ProjectTaskId: projectTaskId },
+    });
+  }
+
+  async getProjectTasksByProjectId(projectId: string): Promise<ProjectTask[]> {
+    return this.projectTaskRepo.find({
+      where: { ProjectId: projectId },
+    });
+  }
+
+  async deleteProjectTasks(taskIds: string[]) {
+    if (!taskIds || taskIds.length === 0) {
+      return { affected: 0 };
+    }
+    this.logger.log(
+      `[DatabaseService] Deleting ${taskIds.length} project tasks`,
+    );
+    return this.projectTaskRepo.delete(taskIds);
+  }
+
+  async upsertProjectTask(taskData: Partial<ProjectTask>) {
+    try {
+      // Use database-level upsert with ON CONFLICT
+      const result = await this.projectTaskRepo
+        .createQueryBuilder()
+        .insert()
+        .into(ProjectTask)
+        .values(taskData)
+        .orUpdate(
+          [
+            'ProjectId',
+            'TaskName',
+            'ParentId',
+            'StartDate',
+            'EndDate',
+            'LearningResource',
+            'CreatedBy',
+            'UpdatedBy',
+          ],
+          ['ProjectTaskId'],
+        )
+        .execute();
+
+      return result;
+    } catch (error) {
+      // Fallback to find and update if database doesn't support UPSERT
+      const existingTask = await this.projectTaskRepo.findOne({
+        where: { ProjectTaskId: taskData.ProjectTaskId },
+      });
+
+      if (existingTask) {
+        return this.projectTaskRepo.update(
+          { ProjectTaskId: taskData.ProjectTaskId },
+          taskData,
+        );
+      } else {
+        return this.projectTaskRepo.save(taskData);
+      }
+    }
+  }
+
+  async upsertProjectTasks(tasksData: Partial<ProjectTask>[]) {
+    try {
+      if (!tasksData || tasksData.length === 0) {
+        this.logger.warn('[DatabaseService] No project tasks to upsert');
+        return { success: true, count: 0 };
+      }
+
+      this.logger.log(
+        `[DatabaseService] Upserting ${tasksData.length} project tasks`,
+      );
+
+      // Process tasks in bulk using save (which handles upsert for existing entities)
+      const results = await this.projectTaskRepo.save(tasksData);
+
+      this.logger.log(
+        `[DatabaseService] Successfully upserted ${results.length} project tasks`,
+      );
+
+      return { success: true, count: results.length, results };
+    } catch (error) {
+      this.logger.error(
+        `[DatabaseService] Error upserting project tasks: ${error.message}`,
+        error.stack,
+      );
+
+      // Fallback: try upserting tasks one by one
+      this.logger.warn(
+        '[DatabaseService] Falling back to individual task upserts',
+      );
+      const results = [];
+      for (const taskData of tasksData) {
+        try {
+          const result = await this.upsertProjectTask(taskData);
+          results.push(result);
+        } catch (taskError) {
+          this.logger.error(
+            `[DatabaseService] Failed to upsert task ${taskData.ProjectTaskId}: ${taskError.message}`,
+          );
+        }
+      }
+
+      return { success: true, count: results.length, results };
+    }
+  }
+
+  // ProjectTaskTracking methods
+  async findProjectTaskTracking(projectId: string, projectTaskId: string) {
+    return this.projectTaskTrackingRepo.findOne({
+      where: {
+        ProjectId: projectId,
+        ProjectTaskId: projectTaskId,
+      },
+    });
+  }
+
+  async saveProjectTaskTracking(data: Partial<ProjectTaskTracking>) {
+    return this.projectTaskTrackingRepo.save(data);
+  }
+
+  async upsertProjectTaskTrackings(trackingData: Partial<ProjectTaskTracking>[]) {
+    try {
+      if (!trackingData || trackingData.length === 0) {
+        this.logger.warn('[DatabaseService] No project task tracking data to upsert');
+        return { success: true, count: 0, inserted: 0, skipped: 0 };
+      }
+
+      this.logger.log(
+        `[DatabaseService] Processing ${trackingData.length} project task tracking records`,
+      );
+
+      let inserted = 0;
+      let skipped = 0;
+
+      for (const tracking of trackingData) {
+        try {
+          // Check if this referenceId (ProjectTaskId) already exists for this ProjectId
+          const existing = await this.findProjectTaskTracking(
+            tracking.ProjectId,
+            tracking.ProjectTaskId,
+          );
+
+          if (existing) {
+            this.logger.debug(
+              `[DatabaseService] Skipping duplicate: ProjectId=${tracking.ProjectId}, ProjectTaskId=${tracking.ProjectTaskId}`,
+            );
+            skipped++;
+            continue;
+          }
+
+          // Insert new record
+          await this.projectTaskTrackingRepo.save(tracking);
+          inserted++;
+
+          this.logger.debug(
+            `[DatabaseService] Inserted tracking: ProjectTaskTrackingId=${tracking.ProjectTaskTrackingId}`,
+          );
+        } catch (error) {
+          this.logger.error(
+            `[DatabaseService] Error processing tracking record: ${error.message}`,
+            error.stack,
+          );
+          skipped++;
+        }
+      }
+
+      this.logger.log(
+        `[DatabaseService] Project task tracking complete: ${inserted} inserted, ${skipped} skipped`,
+      );
+
+      return {
+        success: true,
+        count: trackingData.length,
+        inserted,
+        skipped,
+      };
+    } catch (error) {
+      this.logger.error(
+        `[DatabaseService] Error in upsertProjectTaskTrackings: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }

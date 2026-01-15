@@ -21,18 +21,18 @@ async function migrateCohortMembers() {
         cm."userId",
         cm.status,
         cm."cohortAcademicYearId",
+        cm."createdAt",
+        cm."updatedAt",
         cay."academicYearId"
       FROM public."CohortMembers" cm
       LEFT JOIN public."CohortAcademicYear" cay
-        ON cm."cohortAcademicYearId" = cay."cohortAcademicYearId" WHERE cm."createdAt" BETWEEN '2025-09-23' AND '2025-09-28'
+        ON cm."cohortAcademicYearId" = cay."cohortAcademicYearId"
     `;
 
     const res = await sourceClient.query(query);
     console.log(`[COHORT MEMBERS] Found ${res.rows.length} cohort member records to migrate.`);
-
     for (const row of res.rows) {
       await upsertCohortMember(destClient, row);
-      console.log('[COHORT MEMBERS] 🛑 Stopping after one record for testing');
       // break;
       // Uncomment to test single record
       // console.log('[COHORT MEMBERS] 🛑 Stopping after one record for testing');
@@ -53,8 +53,8 @@ async function upsertCohortMember(destClient, row) {
   try {
     const insert = `
       INSERT INTO public."CohortMember" (
-        "CohortMemberID", "CohortID", "UserID", "MemberStatus", "AcademicYearID"
-      ) VALUES ($1, $2, $3, $4, $5)
+        "CohortMemberID", "CohortID", "UserID", "MemberStatus", "AcademicYearID","CreatedAt","UpdatedAt"
+      ) VALUES ($1, $2, $3, $4, $5,$6,$7)
     `;
 
     const values = [
@@ -63,6 +63,8 @@ async function upsertCohortMember(destClient, row) {
       row.userId,
       row.status || null,
       row.academicYearId || null,
+      row.createdAt,
+      row.updatedAt
     ];
 
     await destClient.query(insert, values);

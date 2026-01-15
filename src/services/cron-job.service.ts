@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy, ConsoleLogger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -75,13 +75,13 @@ export class CronJobService implements OnModuleInit, OnModuleDestroy {
       });
 
       // Process Course data
-      await this.processCourseData();
+      // await this.processCourseData();
 
       // Process QuestionSet data
       await this.processQuestionSetData();
 
       // Process Content data
-      await this.processContentData();
+      // await this.processContentData();
 
       this.jobStatus.lastSuccess = new Date();
       this.jobStatus.successfulExecutions++;
@@ -255,10 +255,7 @@ export class CronJobService implements OnModuleInit, OnModuleDestroy {
   /**
    * Process question set data from Pratham Digital API (for future use)
    */
-  private async processQuestionSetData(): Promise<{
-    totalProcessed: number;
-    duration: number;
-  }> {
+  private async processQuestionSetData() {
     const startTime = Date.now();
     let totalProcessed = 0;
 
@@ -282,6 +279,7 @@ export class CronJobService implements OnModuleInit, OnModuleDestroy {
       for (const questionSetData of apiResponse.data) {
         try {
           const transformedQuestionSet = await this.transformService.transformQuestionSetData(questionSetData);
+          this.logger.debug(`QuestionSet ${questionSetData.identifier} status: ${transformedQuestionSet.status}`);
 
           // Enrich with hierarchy (level arrays + child_nodes)
           const qs = await this.externalApiService.getQuestionSetHierarchy(questionSetData.identifier);
@@ -295,7 +293,7 @@ export class CronJobService implements OnModuleInit, OnModuleDestroy {
             const compact = this.buildCompactQuestionSetChildren(qs);
             (transformedQuestionSet as any).childNodes = compact.length > 0 ? JSON.stringify(compact) : (transformedQuestionSet as any).childNodes || null;
           }
-
+          console.log(transformedQuestionSet);
           await this.saveQuestionSetData(transformedQuestionSet);
           totalProcessed++;
         } catch (error) {

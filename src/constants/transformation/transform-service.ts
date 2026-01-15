@@ -21,7 +21,11 @@ import { RegistrationTracker } from 'src/entities/registration-tracker.entity';
 import { Course } from 'src/entities/course.entity';
 import { QuestionSet } from 'src/entities/question-set.entity';
 import { Content } from 'src/entities/content.entity';
+import { Project } from 'src/entities/project.entity';
+import { ProjectTask } from 'src/entities/projectTask.entity';
+import { ProjectTaskTracking } from 'src/entities/projectTaskTracking.entity';
 import { ExternalCourseData, ExternalQuestionSetData, ExternalContentData } from 'src/types/cron.types';
+import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class TransformService {
@@ -113,7 +117,7 @@ export class TransformService {
         userId: data.userId,
         username: data.username,
         fullName:
-          `${data.firstName || ''} ${data.middleName ? data.middleName + ' ' : ''}${data.lastName || ''}`.trim()|| undefined,
+          `${data.firstName || ''} ${data.middleName ? data.middleName + ' ' : ''}${data.lastName || ''}`.trim() || undefined,
         email: data.email,
         mobile: data.mobile?.toString(),
         dob: data.dob,
@@ -170,7 +174,7 @@ export class TransformService {
         psu: extractCustomField('PSU'),
         groupMembership: extractCustomField('EMP_GROUP'),
       };
-
+      console.log(transformedData,"");
       return transformedData;
     } catch (error) {
       console.error('Error transforming user data:', error);
@@ -628,6 +632,70 @@ export class TransformService {
   /**
    * Transform external question set data to QuestionSet entity format
    */
+  // async transformQuestionSetData(data: ExternalQuestionSetData): Promise<Partial<QuestionSet>> {
+  //   try {
+  //     // Validate required fields
+  //     if (!data.identifier) {
+  //       throw new Error('QuestionSet identifier is required');
+  //     }
+
+  //     // Transform date fields
+  //     const transformDate = (dateValue: string | Date | null | undefined): Date | null => {
+  //       if (!dateValue) return null;
+        
+  //       if (typeof dateValue === 'string') {
+  //         const parsed = new Date(dateValue);
+  //         return isNaN(parsed.getTime()) ? null : parsed;
+  //       }
+        
+  //       if (dateValue instanceof Date) {
+  //         return isNaN(dateValue.getTime()) ? null : dateValue;
+  //       }
+        
+  //       return null;
+  //     };
+
+  //     // Transform text fields to handle arrays and objects
+  //     const transformText = (value: any): string | null => {
+  //       if (!value) return null;
+        
+  //       if (typeof value === 'string') return value;
+  //       if (typeof value === 'number') return value.toString();
+  //       if (Array.isArray(value)) return value.join(', ');
+  //       if (typeof value === 'object') return JSON.stringify(value);
+        
+  //       return null;
+  //     };
+
+  //     // Handle different field name variations from API
+  //     const getFieldValue = (primaryField: any, alternativeField?: any): any => {
+  //       return primaryField || alternativeField || null;
+  //     };
+
+  //     const transformedData: Partial<QuestionSet> = {
+  //       identifier: data.identifier,
+  //       name: data.name || null,
+  //       childNodes: transformText(getFieldValue(data.childNodes)),
+  //       createdOn: transformDate(getFieldValue(data.createdOn)),
+  //       program: transformText(getFieldValue(data.program)),
+  //       assessmentType: data.assessmentType || null,
+  //       contentLanguage: transformText(getFieldValue(data.contentLanguage, data.language)),
+  //     };
+
+  //     return transformedData;
+  //   } catch (error) {
+  //     console.error('Error transforming question set data:', error, {
+  //       identifier: data.identifier,
+  //       error: error.message,
+  //     });
+  //     throw error;
+  //   }
+  // }
+
+  // ...existing code...
+  /**
+   * Transform external question set data to QuestionSet entity format
+   */
   async transformQuestionSetData(data: ExternalQuestionSetData): Promise<Partial<QuestionSet>> {
     try {
       // Validate required fields
@@ -638,37 +706,37 @@ export class TransformService {
       // Transform date fields
       const transformDate = (dateValue: string | Date | null | undefined): Date | null => {
         if (!dateValue) return null;
-        
+
         if (typeof dateValue === 'string') {
           const parsed = new Date(dateValue);
           return isNaN(parsed.getTime()) ? null : parsed;
         }
-        
+
         if (dateValue instanceof Date) {
           return isNaN(dateValue.getTime()) ? null : dateValue;
         }
-        
+
         return null;
       };
 
       // Transform text fields to handle arrays and objects
       const transformText = (value: any): string | null => {
-        if (!value) return null;
-        
+        if (value === undefined || value === null) return null;
+
         if (typeof value === 'string') return value;
         if (typeof value === 'number') return value.toString();
         if (Array.isArray(value)) return value.join(', ');
         if (typeof value === 'object') return JSON.stringify(value);
-        
+
         return null;
       };
 
       // Handle different field name variations from API
       const getFieldValue = (primaryField: any, alternativeField?: any): any => {
-        return primaryField || alternativeField || null;
+        return primaryField ?? alternativeField ?? null;
       };
 
-      const transformedData: Partial<QuestionSet> = {
+      const transformedData = {
         identifier: data.identifier,
         name: data.name || null,
         childNodes: transformText(getFieldValue(data.childNodes)),
@@ -676,17 +744,20 @@ export class TransformService {
         program: transformText(getFieldValue(data.program)),
         assessmentType: data.assessmentType || null,
         contentLanguage: transformText(getFieldValue(data.contentLanguage, data.language)),
+        // Added status mapping (supports variations like data.status or data.workflowStatus)
+        status: data.status,
       };
 
       return transformedData;
     } catch (error) {
       console.error('Error transforming question set data:', error, {
-        identifier: data.identifier,
+        identifier: (data && (data as any).identifier) || undefined,
         error: error.message,
       });
       throw error;
     }
   }
+// ...existing code...
 
   /**
    * Transform external content data to Content entity format
@@ -754,6 +825,370 @@ export class TransformService {
         identifier: data.identifier,
         error: error.message,
       });
+      throw error;
+    }
+  }
+
+  /**
+   * Transform project data from Kafka event to Project entity format
+   */
+  async transformProjectData(data: any): Promise<Partial<Project>> {
+    try {
+      // Validate required fields
+      if (!data.solution?.solutionId) {
+        throw new Error('Solution ID is required');
+      }
+      if (!data.projectTemplate) {
+        throw new Error('Project template is required');
+      }
+
+      // Helper to safely parse dates
+      const parseDate = (dateValue: any): Date | null => {
+        if (!dateValue) return null;
+        try {
+          const parsed = new Date(dateValue);
+          return isNaN(parsed.getTime()) ? null : parsed;
+        } catch (error) {
+          console.warn(`Failed to parse date: ${dateValue}`);
+          return null;
+        }
+      };
+
+      const transformedData: Partial<Project> = {
+        // ProjectId <- solutionId
+        ProjectId: data.solution.solutionId,
+        
+        // ProjectName <- projectTemplate.title
+        ProjectName: data.projectTemplate.title || null,
+        
+        // Board <- projectTemplate.metaData.board
+        Board: data.projectTemplate.metaData?.board || null,
+        
+        // Medium <- projectTemplate.metaData.medium
+        Medium: data.projectTemplate.metaData?.medium || null,
+        
+        // Subject <- projectTemplate.metaData.subject
+        Subject: data.projectTemplate.metaData?.subject || null,
+        
+        // Grade <- projectTemplate.metaData.class
+        Grade: data.projectTemplate.metaData?.class || null,
+        
+        // Type <- projectTemplate.metaData.type
+        Type: data.projectTemplate.metaData?.type || null,
+        
+        // StartDate <- program.startDate
+        StartDate: parseDate(data.program?.startDate),
+        
+        // EndDate <- program.endDate
+        EndDate: parseDate(data.program?.endDate),
+        
+        // CreatedBy <- null (as per mapping)
+        CreatedBy: null,
+        
+        // TenantId and AcademicYear are default - no need to handle
+      };
+
+      console.log(
+        `[TransformService] Transformed project data: ProjectId=${transformedData.ProjectId}, ProjectName=${transformedData.ProjectName}`
+      );
+
+      return transformedData;
+    } catch (error) {
+      console.error('Error transforming project data:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Transform project tasks data from Kafka event to ProjectTask entity format
+   */
+  async transformProjectTasksData(data: any): Promise<Partial<ProjectTask>[]> {
+    try {
+      // Validate required fields
+      if (!data.solution?.solutionId) {
+        throw new Error('Solution ID is required for project tasks');
+      }
+      if (!data.projectTemplateTasks || !Array.isArray(data.projectTemplateTasks)) {
+        throw new Error('Project template tasks array is required');
+      }
+
+      const projectId = data.solution.solutionId;
+      const tasks = data.projectTemplateTasks;
+
+      // Build a map of externalId -> _id for parent lookups
+      const externalIdToIdMap: Record<string, string> = {};
+      tasks.forEach((task: any) => {
+        if (task.externalId && task._id) {
+          externalIdToIdMap[task.externalId] = task._id;
+        }
+      });
+
+      // Helper to safely parse dates
+      const parseDate = (dateValue: any): Date | null => {
+        if (!dateValue) return null;
+        try {
+          const parsed = new Date(dateValue);
+          return isNaN(parsed.getTime()) ? null : parsed;
+        } catch (error) {
+          console.warn(`Failed to parse date: ${dateValue}`);
+          return null;
+        }
+      };
+
+      // Transform each task
+      const transformedTasks: Partial<ProjectTask>[] = tasks.map((task: any) => {
+        // Determine ParentId by looking up the _id of the parent task
+        let parentId: string | null = null;
+        if (task.parentTaskId) {
+          // parentTaskId contains the externalId of the parent
+          parentId = externalIdToIdMap[task.parentTaskId] || null;
+        }
+
+        const transformedTask: Partial<ProjectTask> = {
+          // ProjectTaskId <- task._id
+          ProjectTaskId: task._id,
+          
+          // ProjectId <- solutionId
+          ProjectId: projectId,
+          
+          // TaskName <- task.name
+          TaskName: task.name || null,
+          
+          // ParentId <- _id of the parent task (looked up via parentTaskId -> externalId mapping)
+          ParentId: parentId,
+          
+          // StartDate <- task.startDate
+          StartDate: parseDate(task.startDate),
+          
+          // EndDate <- task.endDate
+          EndDate: parseDate(task.endDate),
+          
+          // LearningResource <- task.learningResources (as JSON)
+          LearningResource: task.learningResources || null,
+          
+          // CreatedBy <- null
+          CreatedBy: null,
+          
+          // UpdatedBy <- null
+          UpdatedBy: null,
+          
+          // CreatedAt and UpdatedAt will use database defaults
+        };
+
+        return transformedTask;
+      });
+
+      console.log(
+        `[TransformService] Transformed ${transformedTasks.length} project tasks for ProjectId=${projectId}`
+      );
+
+      return transformedTasks;
+    } catch (error) {
+      console.error('Error transforming project tasks data:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Transform project task update data from direct message to ProjectTask entity format
+   * Handles both parent tasks and nested children
+   */
+  async transformProjectTaskUpdateData(data: any): Promise<Partial<ProjectTask>[]> {
+    try {
+      // Validate required fields
+      if (!data.solutionId) {
+        throw new Error('Solution ID is required for project task update');
+      }
+      if (!data.tasks || !Array.isArray(data.tasks)) {
+        throw new Error('Tasks array is required');
+      }
+
+      const projectId = data.solutionId;
+      const allTasks: Partial<ProjectTask>[] = [];
+
+      console.log(
+        `[TransformService] Processing project task update for ProjectId=${projectId}, total parent tasks=${data.tasks.length}`
+      );
+
+      // Helper to safely parse dates (handles DD-MM-YYYY format)
+      const parseDate = (dateValue: any): Date | null => {
+        if (!dateValue) return null;
+        try {
+          // Check if it's a DD-MM-YYYY format string
+          if (typeof dateValue === 'string' && dateValue.includes('-')) {
+            const parts = dateValue.split('-');
+            if (parts.length === 3) {
+              const day = parseInt(parts[0], 10);
+              const month = parseInt(parts[1], 10);
+              const year = parseInt(parts[2], 10);
+              
+              // Validate the parts
+              if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
+                // Create date with month-1 (JavaScript months are 0-indexed)
+                const parsed = new Date(year, month - 1, day);
+                return isNaN(parsed.getTime()) ? null : parsed;
+              }
+            }
+          }
+          
+          // Fallback to standard Date parsing
+          const parsed = new Date(dateValue);
+          return isNaN(parsed.getTime()) ? null : parsed;
+        } catch (error) {
+          return null;
+        }
+      };
+
+      // Process each parent task and its children
+      for (const task of data.tasks) {
+        // Skip tasks without referenceId
+        if (!task.referenceId) {
+          console.warn(
+            `[TransformService] Skipping task without referenceId: ${task.name || task._id}`
+          );
+          continue;
+        }
+
+        // Extract dates from metaInformation if available, otherwise from task directly
+        const startDate = parseDate(
+          task.metaInformation?.startDate || task.startDate
+        );
+        const endDate = parseDate(
+          task.metaInformation?.endDate || task.endDate
+        );
+
+        // Transform parent task
+        const parentTask: Partial<ProjectTask> = {
+          ProjectTaskId: task.referenceId, // Use referenceId for matching
+          ProjectId: projectId,
+          TaskName: task.name || null,
+          ParentId: null, // Parent tasks have no parent
+          StartDate: startDate,
+          EndDate: endDate,
+          LearningResource: task.learningResources || null,
+          CreatedBy: task.createdBy || null,
+          UpdatedBy: task.updatedBy || null,
+        };
+        allTasks.push(parentTask);
+
+        // Process children if they exist
+        if (task.children && Array.isArray(task.children)) {
+          for (const child of task.children) {
+            // Skip children without referenceId
+            if (!child.referenceId) {
+              console.warn(
+                `[TransformService] Skipping child task without referenceId: ${child.name || child._id}`
+              );
+              continue;
+            }
+
+            // Extract dates from child's metaInformation
+            const childStartDate = parseDate(
+              child.metaInformation?.startDate || child.startDate
+            );
+            const childEndDate = parseDate(
+              child.metaInformation?.endDate || child.endDate
+            );
+
+            const childTask: Partial<ProjectTask> = {
+              ProjectTaskId: child.referenceId, // Use referenceId for matching
+              ProjectId: projectId,
+              TaskName: child.name || null,
+              ParentId: task.referenceId, // Reference parent by referenceId
+              StartDate: childStartDate,
+              EndDate: childEndDate,
+              LearningResource: child.learningResources || null,
+              CreatedBy: child.createdBy || null,
+              UpdatedBy: child.updatedBy || null,
+            };
+            allTasks.push(childTask);
+          }
+        }
+      }
+
+      console.log(
+        `[TransformService] Transformed ${allTasks.length} tasks (including children) for ProjectId=${projectId}`
+      );
+
+      return allTasks;
+    } catch (error) {
+      console.error('Error transforming project task update data:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Transform project sync data to ProjectTaskTracking records
+   * Only processes tasks with status === 'completed'
+   */
+  async transformProjectTaskTrackingData(data: any): Promise<Partial<ProjectTaskTracking>[]> {
+    try {
+      // Validate required fields
+      if (!data.solutionId) {
+        throw new Error('Solution ID is required for project task tracking');
+      }
+      if (!data.tasks || !Array.isArray(data.tasks)) {
+        throw new Error('Tasks array is required');
+      }
+
+      const projectId = data.solutionId;
+      const cohortId = data.entityId || null;
+      const trackingRecords: Partial<ProjectTaskTracking>[] = [];
+
+      console.log(
+        `[TransformService] Processing project task tracking for ProjectId=${projectId}, total tasks=${data.tasks.length}`
+      );
+
+      // Iterate through each task
+      for (const task of data.tasks) {
+        // Check if parent task is completed
+        if (task.status?.toLowerCase() === 'completed' && task.referenceId) {
+          const trackingRecord: Partial<ProjectTaskTracking> = {
+            ProjectTaskTrackingId: uuidv4(), // Generate unique ID
+            ProjectId: projectId,
+            ProjectTaskId: task.referenceId, // Use referenceId as the task identifier
+            CohortId: cohortId,
+            CreatedBy: task.updatedBy || null,
+            UpdatedBy: task.updatedBy || null,
+          };
+
+          trackingRecords.push(trackingRecord);
+
+          console.log(
+            `[TransformService] Added parent task: ${task.name} (referenceId=${task.referenceId})`
+          );
+        }
+
+        // Check children tasks if they exist
+        if (task.children && Array.isArray(task.children)) {
+          for (const child of task.children) {
+            if (child.status?.toLowerCase() === 'completed' && child.referenceId) {
+              const childTrackingRecord: Partial<ProjectTaskTracking> = {
+                ProjectTaskTrackingId: uuidv4(), // Generate unique ID
+                ProjectId: projectId,
+                ProjectTaskId: child.referenceId, // Use child's referenceId
+                CohortId: cohortId,
+                CreatedBy: child.updatedBy || null,
+                UpdatedBy: child.updatedBy || null,
+              };
+
+              trackingRecords.push(childTrackingRecord);
+
+              console.log(
+                `[TransformService] Added child task: ${child.name} (referenceId=${child.referenceId})`
+              );
+            }
+          }
+        }
+      }
+
+      console.log(
+        `[TransformService] Transformed ${trackingRecords.length} completed task tracking records for ProjectId=${projectId}`
+      );
+
+      return trackingRecords;
+    } catch (error) {
+      console.error('Error transforming project task tracking data:', error);
       throw error;
     }
   }

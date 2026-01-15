@@ -154,7 +154,7 @@ export class UserHandler {
         const userUpdateData = {
           userId: data.userId,
           username: data.user.username,
-          fullName: `${data.user.firstName || ''} ${data.user.lastName || ''}`.trim(),
+          fullName: `${data.user.firstName || ''} ${data.user.middleName ? data.user.middleName + ' ' : '' } ${data.user.lastName || ''}`.trim(),
           email: data.user.email,
           mobile: data.user.mobile?.toString(),
           updatedAt: data.updatedAt ? new Date(data.updatedAt) : new Date(),
@@ -202,7 +202,7 @@ export class UserHandler {
         const userUpdateData = {
           userId: data.userId,
           username: data.user.username,
-          fullName: `${data.user.firstName || ''} ${data.user.lastName || ''}`.trim(),
+          fullName: `${data.user.firstName || ''} ${data.user.middleName ? data.user.middleName + ' ' : '' } ${data.user.lastName || ''}`.trim(),
           email: data.user.email,
           mobile: data.user.mobile?.toString(),
           updatedAt: data.updatedAt ? new Date(data.updatedAt) : new Date(),

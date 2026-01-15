@@ -102,6 +102,7 @@ export interface ExternalQuestionSetData {
   subDomain?: string[] | string;
   subject?: string[] | string;
   language?: string[] | string;
+  status?: string | null
 }
 
 // Content data interface for API responses

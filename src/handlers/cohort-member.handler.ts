@@ -62,6 +62,11 @@ export class CohortMemberHandler {
 
       const updates: Record<string, string | null | undefined> = {};
 
+      // Include status if provided
+      if (status) {
+        updates['MemberStatus'] = status;
+      }
+
       // Path A: Support a direct fields map: { fields: { Subject: 'x', Fees: 'y', ... } }
       if (
         data?.fields &&
@@ -93,7 +98,7 @@ export class CohortMemberHandler {
 
       if (Object.keys(updates).length === 0) {
         this.logger.debug(
-          `No target custom fields found | cohortMembershipId=${cohortMembershipId} | customFieldsLen=${customFields.length} | fieldsKeys=${
+          `No updates to perform | cohortMembershipId=${cohortMembershipId} | status=${status || 'none'} | customFieldsLen=${customFields.length} | fieldsKeys=${
             data?.fields ? Object.keys(data.fields).join(',') : 'none'
           }`,
         );

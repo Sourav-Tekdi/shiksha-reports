@@ -31,7 +31,7 @@ export default registerAs('cron', () => ({
       primaryCategory: 'Practice Question Set',
       fields: [
         'identifier', 'name', 'childNodes', 'createdOn', 'program', 
-        'assessmentType', 'contentLanguage', 'domain', 'subDomain', 'subject'
+        'assessmentType', 'contentLanguage', 'domain', 'subDomain', 'subject', 'status'
       ]
     },
     content: {
