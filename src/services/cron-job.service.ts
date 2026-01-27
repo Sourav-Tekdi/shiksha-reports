@@ -105,6 +105,214 @@ export class CronJobService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Cohort Migration cron job - runs at 12:05 AM IST daily
+   */
+  @Cron('35 18 * * *') // Runs at 12:05 AM IST (18:35 UTC = 00:05 IST)
+  async executeCohortMigrationJob() {
+    const jobName = 'CohortMigration';
+    
+    if (this.jobStatus.isRunning) {
+      this.logger.warn(`${jobName} cron job is already running, skipping this execution`);
+      return;
+    }
+
+    this.logger.info(`Starting ${jobName} cron job execution`, {
+      timestamp: new Date(),
+    });
+
+    try {
+      await this.migrateCohorts();
+      this.logger.info(`${jobName} cron job completed successfully`);
+    } catch (error) {
+      this.logger.error(`${jobName} cron job failed`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Manual trigger for cohort migration
+   */
+  async triggerCohortMigration(): Promise<void> {
+    this.logger.info('Manually triggered cohort migration');
+    return this.migrateCohorts();
+  }
+
+  /**
+   * Migrate cohorts from source to destination database
+   */
+  private async migrateCohorts(): Promise<void> {
+    const { Client } = require('pg');
+    const dbConfig = require('../../shiksha-migration/db');
+    
+    this.logger.info('=== STARTING COHORT MIGRATION ===');
+    
+    const filterDate = new Date().toISOString().split('T')[0]; // Today's date in YYYY-MM-DD format
+    this.logger.info(`📅 Filter: Only migrating cohorts created on: ${filterDate}`);
+    
+    const sourceClient = new Client(dbConfig.source);
+    const destClient = new Client(dbConfig.destination);
+
+    try {
+      await sourceClient.connect();
+      this.logger.info('Connected to source database');
+      await destClient.connect();
+      this.logger.info('Connected to destination database');
+
+      // Fetch cohorts created today
+      const srcQuery = `
+        SELECT c."cohortId", c."tenantId", c."name", c."createdAt", c."parentId"
+        FROM public."Cohort" c
+        WHERE c."createdAt"::date = $1::date
+        ORDER BY c."createdAt" ASC
+      `;
+      
+      const result = await sourceClient.query(srcQuery, [filterDate]);
+      this.logger.info(`Found ${result.rows.length} cohorts to migrate (created on ${filterDate})`);
+
+      for (const cohort of result.rows) {
+        await this.upsertCoreCohort(destClient, cohort);
+        await this.upsertCohortFieldValues(sourceClient, destClient, cohort.cohortId);
+      }
+
+      this.logger.info('All cohorts processed successfully');
+    } catch (err) {
+      this.logger.error('Critical error during cohort migration', err);
+      throw err;
+    } finally {
+      await sourceClient.end();
+      await destClient.end();
+      this.logger.info('Disconnected from databases');
+    }
+  }
+
+  /**
+   * Upsert core cohort record
+   */
+  private async upsertCoreCohort(destClient: any, cohort: any): Promise<void> {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    
+    const parentId = (() => {
+      const v = cohort.parentId;
+      if (!v) return null;
+      return uuidRegex.test(String(v)) ? v : null;
+    })();
+
+    const insert = `
+      INSERT INTO public."Cohort" (
+        "CohortID", "TenantID", "CohortName", "CreatedOn", "ParentID"
+      ) VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT ("CohortID") DO UPDATE SET
+        "TenantID" = EXCLUDED."TenantID",
+        "CohortName" = EXCLUDED."CohortName",
+        "CreatedOn" = EXCLUDED."CreatedOn",
+        "ParentID" = EXCLUDED."ParentID"
+    `;
+
+    const values = [
+      cohort.cohortId,
+      cohort.tenantId || null,
+      cohort.name || null,
+      cohort.createdAt || null,
+      parentId,
+    ];
+
+    await destClient.query(insert, values);
+    this.logger.debug(`Core upsert done for CohortID=${cohort.cohortId}`);
+  }
+
+  /**
+   * Upsert cohort field values
+   */
+  private async upsertCohortFieldValues(sourceClient: any, destClient: any, cohortId: string): Promise<void> {
+    // Import the cohort migration logic
+    const { 
+      COHORT_FIELD_ID_TO_COLUMN,
+      transformCohortType,
+      lookupParentCohortTypeFromSource,
+      coerceValueForColumn 
+    } = require('../../shiksha-migration/cohort-migration');
+
+    this.logger.debug(`Starting field values migration for cohort: ${cohortId}`);
+    
+    // Get cohort parent information
+    const cohortQuery = `SELECT "parentId" FROM public."Cohort" WHERE "cohortId" = $1`;
+    const cohortRes = await sourceClient.query(cohortQuery, [cohortId]);
+    const parentId = cohortRes.rows.length > 0 ? cohortRes.rows[0].parentId : null;
+    const hasParent = !!parentId;
+
+    this.logger.debug(`Cohort ${cohortId} hasParent: ${hasParent}, parentId: ${parentId}`);
+
+    // Look up parent type
+    let parentType = null;
+    if (hasParent) {
+      parentType = await lookupParentCohortTypeFromSource(sourceClient, parentId);
+      this.logger.debug(`Child cohort ${cohortId} has parent ${parentId} with type: ${parentType}`);
+    }
+
+    // Fetch field values
+    const fvQuery = `
+      SELECT fv."fieldId", fv.value
+      FROM public."FieldValues" fv
+      WHERE fv."itemId" = $1
+    `;
+    const fvRes = await sourceClient.query(fvQuery, [cohortId]);
+    this.logger.debug(`Found ${fvRes.rows.length} field values for cohort ${cohortId}`);
+    
+    const updates = {};
+    let hasTypeField = false;
+    
+    for (const row of fvRes.rows) {
+      const fieldId = row.fieldId;
+      const columnName = COHORT_FIELD_ID_TO_COLUMN[fieldId];
+      if (!columnName) continue;
+
+      let coerced = coerceValueForColumn(row.value, columnName, fieldId);
+      
+      if (columnName === 'Type') {
+        hasTypeField = true;
+        const originalValue = coerced;
+        coerced = transformCohortType(coerced, hasParent, parentType);
+        this.logger.debug(`Type transformation for cohort ${cohortId}: ${originalValue} -> ${coerced}`);
+      }
+      
+      updates[columnName] = coerced;
+    }
+
+    // Apply batch type if no Type field was found but we have parent type
+    if (hasParent && !hasTypeField && parentType) {
+      const batchType = transformCohortType('', hasParent, parentType);
+      if (batchType && batchType !== '') {
+        updates['Type'] = batchType;
+        this.logger.debug(`Applying batch type for cohort ${cohortId}: ${batchType}`);
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      this.logger.debug(`No updates to apply for cohort ${cohortId}`);
+      return;
+    }
+
+    // Build dynamic UPDATE
+    const setFragments: string[] = [];
+    const params: any[] = [cohortId];
+    let idx = 2;
+    for (const [col, val] of Object.entries(updates)) {
+      setFragments.push(`"${col}" = $${idx}`);
+      params.push(val);
+      idx += 1;
+    }
+
+    const updateSql = `
+      UPDATE public."Cohort"
+      SET ${setFragments.join(', ')}
+      WHERE "CohortID" = $1
+    `;
+
+    await destClient.query(updateSql, params);
+    this.logger.debug(`Field values updated for CohortID=${cohortId}`);
+  }
+
+  /**
    * Process course data from Pratham Digital API
    */
   private async processCourseData(): Promise<{

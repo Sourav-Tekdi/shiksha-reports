@@ -376,7 +376,14 @@ if (require.main === module) {
   });
 }
 
-module.exports = { migrateCohorts };
+module.exports = { 
+  migrateCohorts,
+  COHORT_FIELD_ID_TO_COLUMN,
+  transformCohortType,
+  lookupParentCohortTypeFromSource,
+  coerceValueForColumn,
+  firstOrSelf
+};
 
 
 // for batch type update run this query
