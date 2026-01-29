@@ -59,6 +59,28 @@ export class CronJobController {
   }
 
   /**
+   * Trigger manual execution of taxonomy sync
+   */
+  @Post('taxonomy-sync/trigger')
+  async triggerTaxonomySync(): Promise<{ message: string; timestamp: Date }> {
+    try {
+      await this.cronJobService.triggerTaxonomySync();
+      return {
+        message: 'Taxonomy sync executed successfully',
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      throw new HttpException(
+        {
+          message: 'Failed to execute taxonomy sync',
+          error: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
    * Health check endpoint
    */
   @Get('health')

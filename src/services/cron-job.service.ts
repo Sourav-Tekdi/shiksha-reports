@@ -138,6 +138,39 @@ export class CronJobService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Taxonomy Sync cron job - runs at 11:00 PM IST daily
+   */
+  @Cron('30 17 * * *') // Runs at 11:00 PM IST (17:30 UTC = 23:00 IST)
+  async executeTaxonomySyncJob() {
+    const jobName = 'TaxonomySync';
+    
+    if (this.jobStatus.isRunning) {
+      this.logger.warn(`${jobName} cron job is already running, skipping this execution`);
+      return;
+    }
+
+    this.logger.info(`Starting ${jobName} cron job execution`, {
+      timestamp: new Date(),
+    });
+
+    try {
+      await this.syncTaxonomy();
+      this.logger.info(`${jobName} cron job completed successfully`);
+    } catch (error) {
+      this.logger.error(`${jobName} cron job failed`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Manual trigger for taxonomy sync
+   */
+  async triggerTaxonomySync(): Promise<void> {
+    this.logger.info('Manually triggered taxonomy sync');
+    return this.syncTaxonomy();
+  }
+
+  /**
    * Migrate cohorts from source to destination database
    */
   private async migrateCohorts(): Promise<void> {
@@ -310,6 +343,273 @@ export class CronJobService implements OnModuleInit, OnModuleDestroy {
 
     await destClient.query(updateSql, params);
     this.logger.debug(`Field values updated for CohortID=${cohortId}`);
+  }
+
+  /**
+   * Sync taxonomy from API to database with intersection logic
+   * Processes multiple frameworks sequentially
+   */
+  private async syncTaxonomy(): Promise<void> {
+    const axios = require('axios');
+    const path = require('path');
+    const fs = require('fs');
+    const { Client } = require('pg');
+    const dbConfig = require('../../shiksha-migration/db');
+    
+    const FRAMEWORKS = ['scp-framework', 'pos-framework', 'pragyanpath-framework'];
+    
+    this.logger.info('🚀 STARTING MULTI-FRAMEWORK TAXONOMY SYNC', { 
+      frameworks: FRAMEWORKS,
+      totalFrameworks: FRAMEWORKS.length 
+    });
+
+    const overallResults = {
+      totalFrameworks: FRAMEWORKS.length,
+      successfulFrameworks: 0,
+      failedFrameworks: 0,
+      frameworkResults: [] as any[]
+    };
+
+    for (let i = 0; i < FRAMEWORKS.length; i++) {
+      const FRAMEWORK_NAME = FRAMEWORKS[i];
+      
+      try {
+        this.logger.info(`\n${'='.repeat(80)}`);
+        this.logger.info(`📦 Processing Framework ${i + 1}/${FRAMEWORKS.length}: ${FRAMEWORK_NAME}`);
+        this.logger.info('='.repeat(80));
+
+        const result = await this.syncSingleFramework(FRAMEWORK_NAME, axios, path, fs, dbConfig);
+        
+        overallResults.successfulFrameworks++;
+        overallResults.frameworkResults.push({
+          framework: FRAMEWORK_NAME,
+          status: 'success',
+          ...result
+        });
+
+        this.logger.info(`✅ Framework ${FRAMEWORK_NAME} completed successfully!\n`);
+
+      } catch (error) {
+        overallResults.failedFrameworks++;
+        overallResults.frameworkResults.push({
+          framework: FRAMEWORK_NAME,
+          status: 'failed',
+          error: error.message
+        });
+
+        this.logger.error(`❌ Framework ${FRAMEWORK_NAME} failed`, error);
+        // Continue with next framework instead of stopping
+      }
+    }
+
+    // Final summary
+    this.logger.info('\n' + '='.repeat(80));
+    this.logger.info('🎯 OVERALL TAXONOMY SYNC SUMMARY');
+    this.logger.info('='.repeat(80));
+    this.logger.info(`Total Frameworks: ${overallResults.totalFrameworks}`);
+    this.logger.info(`Successful: ${overallResults.successfulFrameworks}`);
+    this.logger.info(`Failed: ${overallResults.failedFrameworks}`);
+    
+    for (const result of overallResults.frameworkResults) {
+      if (result.status === 'success') {
+        this.logger.info(`\n✓ ${result.framework}:`, {
+          expected: result.expected,
+          existing: result.existing,
+          matched: result.matched,
+          toInsert: result.toInsert,
+          toDelete: result.toDelete
+        });
+      } else {
+        this.logger.error(`\n✗ ${result.framework}: ${result.error}`);
+      }
+    }
+    
+    this.logger.info('='.repeat(80));
+
+    if (overallResults.failedFrameworks > 0) {
+      throw new Error(`Taxonomy sync completed with ${overallResults.failedFrameworks} failed framework(s)`);
+    }
+  }
+
+  /**
+   * Sync a single framework's taxonomy data
+   */
+  private async syncSingleFramework(
+    FRAMEWORK_NAME: string,
+    axios: any,
+    path: any,
+    fs: any,
+    dbConfig: any
+  ): Promise<any> {
+    const { Client } = require('pg');
+    const API_URL = `https://lap.prathamdigital.org/api/framework/v1/read/${FRAMEWORK_NAME}?categories=board,gradeLevel,subject,medium`;
+    
+    // Helper functions
+    const findByIdentifier = (items: any[], identifier: string) => {
+      return items.find((item: any) => item.identifier === identifier);
+    };
+    
+    const escapeSql = (str: any): string => {
+      if (!str) return '';
+      return str.toString().replace(/'/g, "''");
+    };
+
+    const destClient = new Client(dbConfig.destination);
+    
+    try {
+      // Fetch from API
+      this.logger.info('📡 Fetching data from API...');
+      const response = await axios.get(API_URL);
+      const categories = response.data.result.framework.categories;
+
+      const boards = categories.find((c: any) => c.code === 'board')?.terms || [];
+      const mediums = categories.find((c: any) => c.code === 'medium')?.terms || [];
+      const grades = categories.find((c: any) => c.code === 'gradeLevel')?.terms || [];
+      const subjects = categories.find((c: any) => c.code === 'subject')?.terms || [];
+
+      this.logger.info(`✓ Fetched: ${boards.length} boards, ${mediums.length} mediums, ${grades.length} grades, ${subjects.length} subjects`);
+
+      // Connect to DB
+      await destClient.connect();
+      this.logger.info('✓ Connected to database');
+
+      // Fetch existing records
+      const result = await destClient.query(
+        `SELECT id, level1, level2, level3, level4, status FROM taxonomy WHERE taxonomyid = $1`, 
+        [FRAMEWORK_NAME]
+      );
+      const existingRecords = result.rows;
+      const existingMap = new Map();
+      for (const r of existingRecords) {
+        existingMap.set(`${r.level1}|${r.level2}|${r.level3}|${r.level4}`, r);
+      }
+
+      this.logger.info(`Found ${existingRecords.length} existing records in database`);
+
+      // Generate expected records with INTERSECTION logic
+      const expectedRecords: any[] = [];
+      const expectedKeys = new Set<string>();
+
+      for (const board of boards) {
+        if (board.status === 'Retired') continue;
+        
+        const boardAssocs = Array.isArray(board.associations) ? board.associations : [];
+        const boardMediums = boardAssocs.filter((a: any) => a?.category === 'medium' && a.status === 'Live');
+        const boardSubjects = boardAssocs.filter((a: any) => a?.category === 'subject' && a.status === 'Live');
+
+        this.logger.debug(`📋 ${board.name}: ${boardMediums.length} mediums, ${boardSubjects.length} subjects`);
+
+        for (const boardMedium of boardMediums) {
+          const medium = findByIdentifier(mediums, boardMedium.identifier);
+          if (!medium || medium.status === 'Retired') continue;
+
+          const mediumAssocs = Array.isArray(medium.associations) ? medium.associations : [];
+          const mediumSubjects = mediumAssocs.filter((a: any) => a?.category === 'subject' && a.status === 'Live');
+
+          // INTERSECTION: Board ∩ Medium
+          const matchedSubjects = mediumSubjects.filter((ms: any) => 
+            boardSubjects.some((bs: any) => bs.identifier === ms.identifier)
+          );
+
+          this.logger.debug(`  ${medium.name}: ${matchedSubjects.length} matched subjects`);
+
+          for (const grade of grades) {
+            if (grade.status === 'Retired') continue;
+
+            const gradeAssocs = Array.isArray(grade.associations) ? grade.associations : [];
+            const gradeSubjects = gradeAssocs.filter((a: any) => a?.category === 'subject' && a.status === 'Live');
+
+            // FINAL INTERSECTION: (Board ∩ Medium) ∩ Grade
+            const finalSubjects = matchedSubjects.filter((ms: any) => 
+              gradeSubjects.some((gs: any) => gs.identifier === ms.identifier)
+            );
+
+            for (const subjectAssoc of finalSubjects) {
+              const subject = findByIdentifier(subjects, subjectAssoc.identifier);
+              if (!subject || subject.status === 'Retired') continue;
+
+              expectedRecords.push({
+                level1: grade.name,
+                level2: board.name,
+                level3: medium.name,
+                level4: subject.name,
+                status: subject.status
+              });
+
+              expectedKeys.add(`${grade.name}|${board.name}|${medium.name}|${subject.name}`);
+            }
+          }
+        }
+      }
+
+      this.logger.info(`✓ Generated ${expectedRecords.length} expected records`);
+
+      // Compare and generate SQL statements
+      const insertStatements: any[] = [];
+      const deleteStatements: any[] = [];
+      let matchedCount = 0;
+
+      for (const exp of expectedRecords) {
+        const key = `${exp.level1}|${exp.level2}|${exp.level3}|${exp.level4}`;
+        if (!existingMap.has(key)) {
+          const name = `${exp.level2} - ${exp.level1} - ${exp.level3} - ${exp.level4}`;
+          const sql = `INSERT INTO taxonomy (taxonomyid, taxonomy_name, taxonomy_description, level1, level2, level3, level4, level5, status) VALUES ('${FRAMEWORK_NAME}', '${escapeSql(name)}', '${escapeSql(name)}', '${escapeSql(exp.level1)}', '${escapeSql(exp.level2)}', '${escapeSql(exp.level3)}', '${escapeSql(exp.level4)}', NULL, '${exp.status}');`;
+          insertStatements.push({ sql, ...exp });
+          this.logger.debug(`➕ To Insert: ${exp.level2} > ${exp.level3} > ${exp.level1} > ${exp.level4}`);
+        } else {
+          matchedCount++;
+        }
+      }
+
+      for (const [key, record] of existingMap) {
+        if (!expectedKeys.has(key)) {
+          const sql = `DELETE FROM taxonomy WHERE id = ${record.id};`;
+          deleteStatements.push({ sql, ...record });
+          this.logger.debug(`🗑️  To Delete: ${record.level2} > ${record.level3} > ${record.level1} > ${record.level4}`);
+        }
+      }
+
+      // Save SQL files
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const outputDir = path.join(__dirname, '../../shiksha-migration/taxonomy-scripts');
+      if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+
+      if (insertStatements.length > 0) {
+        let content = `-- INSERT for ${FRAMEWORK_NAME}\n-- ${insertStatements.length} records\n-- Generated at ${new Date().toISOString()}\n\n`;
+        insertStatements.forEach((s: any) => { content += s.sql + '\n'; });
+        const filename = `taxonomy-insert-${FRAMEWORK_NAME}-${timestamp}.sql`;
+        fs.writeFileSync(path.join(outputDir, filename), content);
+        this.logger.info(`✓ INSERT script saved: ${filename} (${insertStatements.length} records)`);
+      }
+
+      if (deleteStatements.length > 0) {
+        let content = `-- DELETE for ${FRAMEWORK_NAME}\n-- ${deleteStatements.length} records\n-- Generated at ${new Date().toISOString()}\n\n`;
+        deleteStatements.forEach((s: any) => { content += s.sql + '\n'; });
+        const filename = `taxonomy-delete-${FRAMEWORK_NAME}-${timestamp}.sql`;
+        fs.writeFileSync(path.join(outputDir, filename), content);
+        this.logger.info(`✓ DELETE script saved: ${filename} (${deleteStatements.length} records)`);
+      }
+
+      const summary = {
+        expected: expectedRecords.length,
+        existing: existingRecords.length,
+        matched: matchedCount,
+        toInsert: insertStatements.length,
+        toDelete: deleteStatements.length
+      };
+
+      this.logger.info('-'.repeat(60));
+      this.logger.info(`${FRAMEWORK_NAME} Summary:`, summary);
+      this.logger.info('-'.repeat(60));
+
+      return summary;
+
+    } catch (error) {
+      this.logger.error(`❌ Failed to sync framework ${FRAMEWORK_NAME}`, error);
+      throw error;
+    } finally {
+      await destClient.end();
+    }
   }
 
   /**
